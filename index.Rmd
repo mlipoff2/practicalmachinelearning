@@ -1,0 +1,89 @@
+---
+title: "coursera"
+author: "Marc Lipoff"
+date: "February 28, 2016"
+output: html_document
+---
+
+Extract data from given url, and set data as training data
+```{r, warning=FALSE, message=FALSE}
+library(RCurl)
+library(caret)
+URL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+x <- getURL(URL)
+training <- read.csv(textConnection(x))
+
+```
+
+
+Remove row index
+```{r}
+training <- training[,-1]
+```
+
+Try to convert string columns to numeric, when appropriate
+```{r, warning=FALSE, message=FALSE}
+for(i in 1:(length(training)-1)) {
+  if (is.factor(training[,i]) & !(names(training)[i] %in% c("user_name", "new_window"))) {
+    training[,i] <- as.numeric(as.character(training[,i]))
+  }
+}
+```
+
+Only keep fields that don't have any NA's. Remove timestamp and user fields from training data. Result is data with only numeric predictors.
+```{r, warning=FALSE, message=FALSE}
+i <- 1
+while (i <= (length(training)-1)) {
+  per_na <- sum(is.na(training[,i]))/nrow(training)
+  if (per_na > 0 & is.numeric(training[,i])) {
+    training <- training[,-i]
+  } else {
+    i <- i +1
+  }
+}
+
+training <- training[,-c(1:6)]
+```
+
+Take a quick look at some of the data. The data seems segregated, but no always a good predictor (at least visually). Hoping algorithm will do better.
+
+```{r}
+qplot(data=training, x=classe, y=yaw_arm, geom="boxplot")
+qplot(data=training, accel_dumbbell_x, geom="density", colour=classe)
+qplot(data=training, x=yaw_arm, y=accel_dumbbell_y, geom="point", colour=classe)
+```
+
+Preprocess the data using the caret package. Set pca threshold to 0.8
+```{r}
+pp <- preProcess(training[,-length(training)], method=c("pca", "center", "scale"), thresh = .8)
+training.pp <- predict(pp, training[,-length(training)])
+training.pp$classe <- training$classe
+```
+
+Explore the results of PCA. 
+
+```{r}
+qplot(data=training.pp, x=PC1, y=PC2, colour=classe, geom="point")
+```
+
+Data is very large, so need to set tuning correctly. Model will be selected with 10 fold cross validation, and 2 repeats. Will use Random Forests, trying mtry=2,6, and 10. Random forests perform will with non linear data. 
+```{r}
+fitControl <- trainControl(
+  method = "cv",
+  number = 10,
+  repeats = 2)
+
+tGrid <- expand.grid(mtry=c(2,6,10))
+```
+
+Run model
+```{r,cache=TRUE, warning=FALSE, message=FALSE}
+mdl1 <- train(classe~., data=training.pp, method="rf", do.trace=FALSE, ntree=100, tuneGrid = tGrid, trControl = fitControl)
+```
+
+Explore results. In sample is about 5%. Out of sample error would be slightly more.
+``` {r, warning=FALSE, message=FALSE}
+mdl1
+mdl1$finalModel$confusion
+varImp(mdl1)
+```
